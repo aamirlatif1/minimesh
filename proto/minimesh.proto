@@ -1,0 +1,65 @@
+syntax = "proto3";
+
+package minimesh;
+
+option go_package = "github.com/aamirlatif1/minimesh/proto;minimeshpb";
+
+// Coordinator plays both NetBird roles: Management (registry, peer list push)
+// and Signal (forwarding connection candidates between peers).
+service Coordinator {
+  // Register a WireGuard public key and get an overlay IP. Idempotent: the
+  // same key always gets the same IP.
+  rpc Register(RegisterRequest) returns (RegisterResponse);
+
+  // Sync streams the current list of online peers (excluding the caller)
+  // every time it changes. A peer is online while its Sync stream is open.
+  rpc Sync(SyncRequest) returns (stream PeerList);
+
+  // Signal is a mailbox: envelopes sent here are delivered to the Signal
+  // stream of `to`. The caller identifies itself with the "x-public-key"
+  // metadata header. Payload is opaque to the coordinator.
+  rpc Signal(stream Envelope) returns (stream Envelope);
+}
+
+message RegisterRequest {
+  string public_key = 1; // base64 WireGuard public key
+  string name = 2;
+}
+
+message RegisterResponse {
+  string overlay_ip = 1; // e.g. 10.99.0.1
+}
+
+message SyncRequest {
+  string public_key = 1;
+}
+
+message Peer {
+  string public_key = 1;
+  string name = 2;
+  string overlay_ip = 3;
+}
+
+message PeerList {
+  repeated Peer peers = 1;
+}
+
+message Envelope {
+  string from = 1; // set by the coordinator from the sender's stream identity
+  string to = 2;
+  bytes payload = 3; // opaque; peers put a marshalled Candidates here
+}
+
+// Candidates is the Envelope payload peers exchange. The coordinator never
+// decodes it. NetBird encrypts this end to end; minimesh does not (yet).
+message Candidates {
+  repeated Candidate candidates = 1;
+  // reply_requested asks the receiver to answer with its own candidates, in
+  // case its earlier envelope was sent before our Signal stream existed.
+  bool reply_requested = 2;
+}
+
+message Candidate {
+  string type = 1; // "host" or "srflx" (ICE vocabulary, RFC 8445 5.1.1)
+  string addr = 2; // ip:port
+}
